@@ -1,3 +1,17 @@
+/**************************
+ * Fluval LED Control
+ * for ESP8266-12E (NodeMCU) modules
+ * (C)2017 by Steve Luzynski except where noted 
+ * 
+ * Wiring: Connect an IR LED to GPIO0 through a 330 Ohm resistor to the 3.3V 
+ * power supply pin.
+ * 
+ * Codes in buttons.h reversed by pointing the OEM remote at an
+ * ESP based IR decoder module, no disassembly of the LED
+ * fixture was done.
+ * 
+ */
+
 #include <math.h>
 #include <ArduinoJson.h>
 #include <Time.h>
@@ -13,11 +27,12 @@
 
 #include "buttons.h"
 
-//#define TESTMODE  // this makes it loop through all the alarms every time through the loop.
+#define WEATHER // define this to enable weather interactivity or
+                // comment it out if you wish to disable the weather
 
 // Customize these to match your install
-const char* ssid        = "private_network";
-const char* password    = "seekret";
+const char* ssid        = "privat_network";
+const char* password    = "secret";
 const char* weatherHost = "api.wunderground.com";
 const char* state       = "MO";
 const char* city        = "Blue_Springs";
@@ -25,7 +40,7 @@ const char* api_key     = "getyourownkey";
 const float latitude    = 39.02000046;
 const float longitude   = -94.27999878;
 const signed int offset = -6;
-const bool is_dst       = false;
+const bool is_dst       = true;
 
 struct SunTimes {
   TimeElements sunrise;
@@ -55,41 +70,36 @@ void setup()
         while (WiFi.status() != WL_CONNECTED) {
                 Alarm.delay(500);
                 yield();
-                Serial.print(".");
+                Serial.println(".");
         }
 
         Serial.println("");
-        Serial.println("WiFi connected");
-        Serial.println("IP address: ");
+        Serial.println(F("WiFi connected"));
+        Serial.println(F("IP address: "));
         Serial.println(WiFi.localIP());
 
         // Use WiFiClient class to create TCP connections
         WiFiClient client;
         unsigned long unixTime = webUnixTime(client);
-        Serial.print("Current unix time: "); Serial.println(unixTime);
-        setTime(unixTime); // set the time in the time library to the real time
+        Serial.print(F("Current unix time (GMT): ")); Serial.println(unixTime);
+        setTime(unixTime); // set the time in the time library to the real time (in GMT)
+        if (!is_dst) adjustTime(offset * 60 * 60); // adjust time to the local time so from now on all time refs are local
+        else adjustTime((offset+1) *60 *60);
+        Serial.print(F("Adjusted unix time (local): ")); Serial.println(now());
 
         MorningAlarm(); // run once for setup of sunrise/sunset alarms the first time the app runs
                         // also sets the current lighting situation to match the time so it's correct
                         // on first run.  
         
         Alarm.alarmRepeat(5,0,0, MorningAlarm); // at 5:00AM update sunrise/sunset times
-        Alarm.timerRepeat(900, quarterAlarm); // every 15 minute tasks
+        #ifdef WEATHER
+        Alarm.timerRepeat(900, quarterAlarm); // every 15 minute tasks - currently all weather related
+        #endif
 }
 
 void loop() {
         Alarm.delay(1000);
         yield();
-        #ifdef TESTMODE
-        alarmSunrise();
-        Alarm.delay(100);
-        alarmDay();
-        Alarm.delay(100);
-        alarmDusk();
-        Alarm.delay(100);
-        alarmNight();
-        Alarm.delay(100);
-        #endif
 }
 
 void quarterAlarm() { // every 15 minute task - check the weather and change the lighting to match
@@ -100,9 +110,15 @@ void quarterAlarm() { // every 15 minute task - check the weather and change the
         // Item 1 - make sure it doesn't change the weather lighting after dusk (dusk trumps weather)
         // Item 2 - figure out what the other observations are and map them.
 
-        if (weather.observation == "Partly Cloudy") {
-                irsend.sendNEC(btn_partlycloudy, 32);
-        }
+        Serial.println(weather.observation);
+        if (weather.observation == "Partly Cloudy") 
+            irsend.sendNEC(btn_partlycloudy, 32);
+        
+        if (weather.observation == "Mostly Cloudy")
+            irsend.sendNEC(btn_mostlycloudy, 32);
+         
+        if (weather.observation == "Clear")
+            irsend.sendNEC(btn_blue, 32); // this is probably a bad choice, fix TODO
 }
 
 void MorningAlarm() {
@@ -110,39 +126,17 @@ void MorningAlarm() {
         SunTimes times;
         getSunrise(times); 
 
-        Serial.println("In MorningAlarm.");
+        Serial.println(F("In MorningAlarm."));
         
-        int dow = weekday(); // int, which is sensible, needs to be converted to a const which is stupid as hell.
-        timeDayOfWeek_t theDow;
-
-        switch (dow){
-          case 1 :
-            theDow = dowSunday;
-            break;
-          case 2 : 
-            theDow = dowMonday;
-            break;
-          case 3 : 
-            theDow = dowTuesday;
-            break;
-          case 4 :
-            theDow = dowWednesday;
-            break;
-          case 5 :
-            theDow = dowThursday;
-            break;
-          case 6 :
-            theDow = dowFriday;
-            break;
-          case 7 :
-            theDow = dowSaturday;
-            break;
-        }
+        Serial.print(F("Sunrise: ")); Serial.print(times.sunrise.Hour); Serial.print(":");
+        Serial.println(times.sunrise.Minute);
+        Serial.print(F("Sunset: ")); Serial.print(times.sunset.Hour); Serial.print(":");
+        Serial.println(times.sunset.Minute);
         
-        Alarm.alarmOnce(theDow, times.sunrise.Hour, times.sunrise.Minute, times.sunrise.Second, alarmSunrise);  // sunrise button
-        Alarm.alarmOnce(theDow, times.sunrise.Hour + 1, times.sunrise.Minute, times.sunrise.Second, alarmDay);  // full light
-        Alarm.alarmOnce(theDow, times.sunset.Hour, times.sunset.Minute, times.sunset.Second, alarmDusk);        // dusk button
-        Alarm.alarmOnce(theDow, times.sunset.Hour + 1, times.sunset.Minute, times.sunset.Second, alarmNight);   // night button
+        Alarm.triggerOnce(makeTime(times.sunrise), alarmSunrise);  // sunrise button
+        Alarm.triggerOnce(makeTime(times.sunrise) + 3600, alarmDay);  // full light
+        Alarm.triggerOnce(makeTime(times.sunset), alarmDusk);        // dusk button
+        Alarm.triggerOnce(makeTime(times.sunset) + 3600, alarmNight);   // night button
 
         // compare current time to sunrise/sunset times and set the lights as appropriate.
         // this will fix the first run situation. on subsequent runs it will do nothing as the lights
@@ -156,8 +150,8 @@ void getSunrise(SunTimes& times) {
         int sunrise_mins = blueSprings.sunrise(year(), month(), day(), is_dst);
         int sunset_mins  = blueSprings.sunset(year(), month(), day(), is_dst);
 
-        Serial.print("Sunrise offset: "); Serial.println(sunrise_mins);
-        Serial.print("Sunset offset: "); Serial.println(sunset_mins);
+        Serial.print(F("Sunrise offset: ")); Serial.println(sunrise_mins);
+        Serial.print(F("Sunset offset: ")); Serial.println(sunset_mins);
 
         TimeElements tm_sunrise;
         TimeElements tm_sunset;
@@ -174,16 +168,17 @@ void getSunrise(SunTimes& times) {
         times.sunrise = tm_sunrise;
         times.sunset = tm_sunset;
         
-        Serial.print("Sunrise time: "); Serial.println(makeTime(times.sunrise));
-        Serial.print("Sunset time: "); Serial.println(makeTime(times.sunset));
+        Serial.print(F("Sunrise time: ")); Serial.println(makeTime(times.sunrise));
+        Serial.print(F("Sunset time: ")); Serial.println(makeTime(times.sunset));
 }
 
 void getWeather(Weather& weather) {
+        Serial.print(F("Getting weather at ")); Serial.println(now());
         // Use WiFiClient class to create TCP connections
         WiFiClient client;
         const int httpPort = 80;
         if (!client.connect(weatherHost, httpPort)) {
-                Serial.println("connection failed");
+                Serial.println(F("connection failed"));
                 return;
         }
 
@@ -195,7 +190,7 @@ void getWeather(Weather& weather) {
         url += "/";
         url += city;
         url += ".json";
-        Serial.print("Requesting URL: ");
+        Serial.print(F("Requesting URL: "));
         Serial.println(url);
 
         // This will send the request to the server
@@ -222,7 +217,7 @@ void getWeather(Weather& weather) {
                 else {
                         int bytesIn;
                         bytesIn = client.read((uint8_t *)&respBuf[respLen], sizeof(respBuf) - respLen);
-                        Serial.print(F("bytesIn ")); Serial.println(bytesIn);
+                        //Serial.print(F("bytesIn ")); Serial.println(bytesIn);
                         if (bytesIn > 0) {
                                 respLen += bytesIn;
                                 if (respLen > sizeof(respBuf)) respLen = sizeof(respBuf);
@@ -265,26 +260,25 @@ void getWeather(Weather& weather) {
         JsonObject& current_observation = root["current_observation"];
         weather.observation = current_observation["weather"]; // "Partly Cloudy"
 
-        Serial.println(weather.observation);
 }
 
 void alarmSunrise() {
-  Serial.println("It's sunrise");
-  irsend.sendNEC(btn_sunrise, 32);
+  Serial.println(F("It's sunrise"));
+  irsend.sendNEC(btn_orange, 32);
 }
 
 void alarmDay() {
-  Serial.println("It's daytime");
+  Serial.println(F("It's daytime"));
   irsend.sendNEC(btn_blue, 32);
 }
 
 void alarmDusk() {
-  Serial.println("It's dusk");
+  Serial.println(F("It's dusk"));
   irsend.sendNEC(btn_dusk, 32);
 }
 
 void alarmNight() {
-  Serial.println("It's nighttime");
+  Serial.println(F("It's nighttime"));
   irsend.sendNEC(btn_night, 32);
 }
 
