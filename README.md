@@ -22,16 +22,17 @@ To install the application, you will need:
 * An ESP8266 board, such as a [NodeMCU](https://smile.amazon.com/gp/product/B010O1G1ES/ref=oh_aui_detailpage_o00_s00?ie=UTF8&psc=1).
 * One IR LED
 * One 330 ohm resistor
-* Breadboard, stripboard, or just clever soldering skills
+* Breadboard, stripboard, or clever soldering skills
+* Optionally a 3d printer to make an enclosure - I used [this one](http://www.thingiverse.com/thing:1128026)
 
 Install the application with the Arduino IDE. You will need to install
 the ESP8266 board support package through board manager, and the ESP8266
-libraries for IR, WiFi, and web server through the library manager.
+libraries for IR, WiFi, Time, TimeAlarms, and Dusk2Dawn through the library manager.
 
 Note that installing a program via the Arduino IDE will blow away the Lua
 environment that comes on the module. It's possible to restore if you like;
-IMO it is a less capable solution than using the Arduino toolset anyway
-and I doubt you will miss it. 
+IMO it is a less capable solution than using the Arduino IDE anyway
+and I doubt you will miss it.
 
 # Wiring
 
@@ -42,5 +43,15 @@ to ground.
 
 # Usage
 
-On first boot, the ESP will boot up in web server mode. Locate the SSID
-for the ESP on your phone or laptop and join it.
+Configure the variables for your location, wireless SSID, etc. and flash to the module.
+Mount it someplace where the IR LED will illuminate the IR receiver attached to the
+light fixture.
+
+# Caveats
+
+As of this push the weather functionality is half baked - only a few possible
+conditions actually equate to a lighting scene. Also weather conditions will override
+time of day which is not ideal when the weather changes to clear at 11:00pm
+and the lights suddenly come on full blast again.
+
+Both of these are marked with TODO and I'll get to them as soon as I can.
